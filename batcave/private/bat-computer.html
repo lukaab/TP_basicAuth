@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Bat-Ordinateur</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #111;
+      color: white;
+      padding: 30px;
+    }
+
+    h1 {
+      color: #f5c542;
+    }
+
+    .grid {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      margin-top: 20px;
+    }
+
+    .card {
+      background-color: #222;
+      border: 1px solid #444;
+      border-radius: 8px;
+      padding: 20px;
+      width: 220px;
+    }
+
+    textarea {
+      width: 100%;
+      height: 100px;
+      margin-top: 20px;
+    }
+
+    button {
+      margin-top: 10px;
+      padding: 10px 15px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>Bat-Ordinateur</h1>
+
+  <h2 id="welcome">Bienvenue dans la Batcave</h2>
+
+  <h2>Arsenal de Batman</h2>
+  <div id="secrets" class="grid"></div>
+
+  <h2>Rapport de mission</h2>
+  <textarea id="reportContent" placeholder="Écris ton rapport ici..."></textarea>
+  <br>
+  <button id="sendReport">Envoyer le rapport</button>
+
+  <p id="message"></p>
+
+  <script>
+    const username = prompt("Nom d'utilisateur :");
+    const password = prompt("Mot de passe :");
+
+    const headers = new Headers();
+    headers.set('Authorization', 'Basic ' + btoa(username + ':' + password));
+    headers.set('Content-Type', 'application/json');
+
+    async function loadUser() {
+      const response = await fetch('/api/me', {
+        method: 'GET',
+        headers: headers
+      });
+
+      if (!response.ok) {
+        document.getElementById('welcome').textContent = 'Erreur d’authentification';
+        return;
+      }
+
+      const user = await response.json();
+
+      document.getElementById('welcome').textContent =
+        'Bienvenue, Justicier ' + user.username;
+    }
+
+    async function loadSecrets() {
+      const response = await fetch('/api/secrets', {
+        method: 'GET',
+        headers: headers
+      });
+
+      if (!response.ok) {
+        document.getElementById('secrets').textContent = 'Impossible de charger les gadgets.';
+        return;
+      }
+
+      const secrets = await response.json();
+      const container = document.getElementById('secrets');
+
+      secrets.forEach(secret => {
+        const card = document.createElement('div');
+        card.className = 'card';
+
+        card.innerHTML = `
+          <h3>${secret.name}</h3>
+          <p>${secret.desc}</p>
+          <small>${secret.icon}</small>
+        `;
+
+        container.appendChild(card);
+      });
+    }
+
+    async function sendReport() {
+      const content = document.getElementById('reportContent').value;
+
+      const response = await fetch('/api/reports', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({ content: content })
+      });
+
+      const message = await response.text();
+
+      document.getElementById('message').textContent = message;
+    }
+
+    document.getElementById('sendReport').addEventListener('click', sendReport);
+
+    loadUser();
+    loadSecrets();
+  </script>
+</body>
+</html>
