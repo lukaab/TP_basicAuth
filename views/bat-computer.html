@@ -15,6 +15,10 @@
       color: #f5c542;
     }
 
+    a {
+      color: #f5c542;
+    }
+
     .grid {
       display: flex;
       gap: 20px;
@@ -46,9 +50,13 @@
 <body>
   <h1>Bat-Ordinateur</h1>
 
-  <h2 id="welcome">Bienvenue dans la Batcave</h2>
+  <p>Bienvenue, Justicier {{username}}</p>
 
-  <h2>Arsenal de Batman</h2>
+  <p>
+    <a href="/auth/logout">Se déconnecter</a>
+  </p>
+
+  <h2>Gadgets secrets</h2>
   <div id="secrets" class="grid"></div>
 
   <h2>Rapport de mission</h2>
@@ -59,38 +67,11 @@
   <p id="message"></p>
 
   <script>
-    const username = prompt("Nom d'utilisateur :");
-    const password = prompt("Mot de passe :");
-
-    const headers = new Headers();
-    headers.set('Authorization', 'Basic ' + btoa(username + ':' + password));
-    headers.set('Content-Type', 'application/json');
-
-    async function loadUser() {
-      const response = await fetch('/api/me', {
-        method: 'GET',
-        headers: headers
-      });
-
-      if (!response.ok) {
-        document.getElementById('welcome').textContent = 'Erreur d’authentification';
-        return;
-      }
-
-      const user = await response.json();
-
-      document.getElementById('welcome').textContent =
-        'Bienvenue, Justicier ' + user.username;
-    }
-
     async function loadSecrets() {
-      const response = await fetch('/api/secrets', {
-        method: 'GET',
-        headers: headers
-      });
+      const response = await fetch('/api/secrets');
 
       if (!response.ok) {
-        document.getElementById('secrets').textContent = 'Impossible de charger les gadgets.';
+        window.location.href = '/auth/login';
         return;
       }
 
@@ -116,7 +97,9 @@
 
       const response = await fetch('/api/reports', {
         method: 'POST',
-        headers: headers,
+        headers: {
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify({ content: content })
       });
 
@@ -127,7 +110,6 @@
 
     document.getElementById('sendReport').addEventListener('click', sendReport);
 
-    loadUser();
     loadSecrets();
   </script>
 </body>
