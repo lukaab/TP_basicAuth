@@ -12,7 +12,7 @@ router.get('/bat-computer', isAuthenticated, (req, res) => {
 
   const personalizedHtml = html.replace('{{username}}', req.session.user.username);
 
-  res.send(personalizedHtml);
+  return res.send(personalizedHtml);
 });
 
 router.get('/api/me', isAuthenticated, (req, res) => {
