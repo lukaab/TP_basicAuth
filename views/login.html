@@ -23,64 +23,43 @@
       border: 1px solid #444;
     }
 
-    h1, h2 {
+    h1 {
       color: #f5c542;
       text-align: center;
-    }
-
-    label {
-      display: block;
-      margin-top: 15px;
-    }
-
-    input {
-      width: 100%;
-      padding: 10px;
-      margin-top: 5px;
-      box-sizing: border-box;
-    }
-
-    button {
-      width: 100%;
-      padding: 10px;
-      margin-top: 20px;
-      background-color: #f5c542;
-      border: none;
-      cursor: pointer;
-      font-weight: bold;
-    }
-
-    a {
-      color: #f5c542;
     }
 
     p {
       text-align: center;
+      line-height: 1.5;
     }
 
-    .hidden {
-      display: none;
-    }
-
-    #qrCodeImage {
-      width: 220px;
+    .oauth-button {
       display: block;
-      margin: 20px auto;
-      background-color: white;
-      padding: 10px;
-    }
-
-    .message {
-      margin-top: 15px;
       text-align: center;
+      text-decoration: none;
+      padding: 14px;
+      margin-top: 15px;
+      border-radius: 6px;
+      font-weight: bold;
+      color: white;
     }
 
-    .secret {
-      word-break: break-all;
-      font-size: 13px;
-      background-color: #111;
-      padding: 10px;
-      border: 1px solid #444;
+    .google {
+      background-color: #4285f4;
+    }
+
+    .github {
+      background-color: #333;
+    }
+
+    .facebook {
+      background-color: #1877f2;
+    }
+
+    .note {
+      color: #ccc;
+      font-size: 14px;
+      margin-top: 25px;
     }
   </style>
 </head>
@@ -88,53 +67,26 @@
   <div class="container">
     <h1>Connexion Batcave</h1>
 
-    <form id="loginForm">
-      <label for="username">Nom d'utilisateur</label>
-      <input type="text" id="username" required>
-
-      <label for="password">Mot de passe</label>
-      <input type="password" id="password" required>
-
-      <button type="submit">Se connecter</button>
-    </form>
-
-    <div id="twoFactorZone" class="hidden">
-      <h2>Code 2FA</h2>
-
-      <label for="code2FA">Code à 6 chiffres</label>
-      <input type="text" id="code2FA" placeholder="000000">
-
-      <button id="verify2FAButton">Vérifier le code</button>
-    </div>
-
-    <div id="setupZone" class="hidden">
-      <h2>Activer la 2FA</h2>
-
-      <p>Scanne ce QR Code avec Google Authenticator ou une application équivalente.</p>
-
-      <button id="generateQRButton">Générer le QR Code</button>
-
-      <div id="qrResult" class="hidden">
-        <img id="qrCodeImage" alt="QR Code 2FA">
-
-        <p>Secret de secours :</p>
-        <p id="secretText" class="secret"></p>
-
-        <label for="confirmCode">Premier code à 6 chiffres</label>
-        <input type="text" id="confirmCode" placeholder="000000">
-
-        <button id="confirm2FAButton">Confirmer l'activation</button>
-      </div>
-    </div>
-
-    <p id="message" class="message"></p>
-
     <p>
-      Pas encore inscrit ?
-      <a href="/register.html">Créer un compte</a>
+      Choisis un fournisseur d'identité pour entrer dans la Batcave.
+    </p>
+
+    <a class="oauth-button google" href="/auth/google">
+      Se connecter avec Google
+    </a>
+
+    <a class="oauth-button github" href="/auth/github">
+      Se connecter avec GitHub
+    </a>
+
+    <a class="oauth-button facebook" href="/auth/facebook">
+      Se connecter avec Facebook
+    </a>
+
+    <p class="note">
+      Dans ce TP, l'application ne gère plus directement les mots de passe locaux.
+      L'authentification est déléguée à un fournisseur externe.
     </p>
   </div>
-
-  <script src="/login.js"></script>
 </body>
 </html>

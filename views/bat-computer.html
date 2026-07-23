@@ -34,15 +34,11 @@
       width: 220px;
     }
 
-    textarea,
-    input {
+    textarea {
       width: 100%;
       padding: 10px;
       margin-top: 10px;
       box-sizing: border-box;
-    }
-
-    textarea {
       height: 100px;
     }
 
@@ -62,7 +58,13 @@
 <body>
   <h1>Bat-Ordinateur</h1>
 
-  <p>Bienvenue, Justicier <span id="username">...</span></p>
+  <p>
+    Bienvenue, Justicier <span id="username">...</span>
+  </p>
+
+  <p>
+    Connexion via : <span id="provider">...</span>
+  </p>
 
   <p>
     <a href="/auth/logout">Se déconnecter</a>
@@ -80,18 +82,6 @@
     <br>
     <button id="sendReport">Envoyer le rapport</button>
     <p id="reportMessage"></p>
-  </div>
-
-  <div class="section">
-    <h2>Modifier mon mot de passe</h2>
-
-    <form id="changePasswordForm">
-      <input type="password" id="oldPassword" placeholder="Ancien mot de passe" required>
-      <input type="password" id="newPassword" placeholder="Nouveau mot de passe fort" required>
-      <button type="submit">Modifier le mot de passe</button>
-    </form>
-
-    <p id="passwordMessage"></p>
   </div>
 
   <script src="/dashboard.js"></script>

@@ -13,7 +13,8 @@ function isAuthenticated(req, res, next) {
 
     req.user = {
       id: decodedUser.id,
-      username: decodedUser.username
+      username: decodedUser.username,
+      provider: decodedUser.provider
     };
 
     return next();

@@ -31,11 +31,28 @@ async function apiFetch(url, options = {}) {
   return response;
 }
 
+function formatProvider(provider) {
+  if (provider === 'google') {
+    return 'Google';
+  }
+
+  if (provider === 'github') {
+    return 'GitHub';
+  }
+
+  if (provider === 'facebook') {
+    return 'Facebook';
+  }
+
+  return 'Fournisseur inconnu';
+}
+
 async function loadUser() {
   const response = await apiFetch('/api/me');
   const user = await response.json();
 
   document.getElementById('username').textContent = user.username;
+  document.getElementById('provider').textContent = formatProvider(user.provider);
 }
 
 async function loadSecrets() {
@@ -82,35 +99,8 @@ async function sendReport() {
   document.getElementById('reportMessage').textContent = message;
 }
 
-async function changePassword(event) {
-  event.preventDefault();
-
-  const oldPassword = document.getElementById('oldPassword').value;
-  const newPassword = document.getElementById('newPassword').value;
-
-  const response = await apiFetch('/api/auth/change-password', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      oldPassword: oldPassword,
-      newPassword: newPassword
-    })
-  });
-
-  const message = await response.text();
-
-  document.getElementById('passwordMessage').textContent = message;
-
-  if (response.ok) {
-    document.getElementById('changePasswordForm').reset();
-  }
-}
-
 document.getElementById('reloadSecrets').addEventListener('click', loadSecrets);
 document.getElementById('sendReport').addEventListener('click', sendReport);
-document.getElementById('changePasswordForm').addEventListener('submit', changePassword);
 
 loadUser();
 loadSecrets();

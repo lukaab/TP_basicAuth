@@ -1,13 +1,11 @@
 const express = require('express');
-const bcrypt = require('bcrypt');
 const path = require('path');
+const fs = require('fs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const qrcode = require('qrcode');
-const { authenticator } = require('@otplib/preset-v11');
 
 const db = require('../config/db');
-const { isAuthenticated } = require('../middlewares/authCheck');
+const oauthProviders = require('../config/oauthProviders');
 
 const router = express.Router();
 
@@ -21,11 +19,55 @@ const cookieOptions = {
   secure: process.env.NODE_ENV === 'production'
 };
 
+function base64Url(buffer) {
+  return buffer
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function createRandomValue(size = 32) {
+  return base64Url(crypto.randomBytes(size));
+}
+
+function createCodeVerifier() {
+  return createRandomValue(64);
+}
+
+function createCodeChallenge(codeVerifier) {
+  const hash = crypto
+    .createHash('sha256')
+    .update(codeVerifier)
+    .digest();
+
+  return base64Url(hash);
+}
+
+function getRedirectUri(providerKey) {
+  return `${process.env.APP_BASE_URL}/auth/${providerKey}/callback`;
+}
+
+function getProvider(providerKey) {
+  const provider = oauthProviders[providerKey];
+
+  if (!provider) {
+    return null;
+  }
+
+  if (!provider.clientId || !provider.clientSecret) {
+    return null;
+  }
+
+  return provider;
+}
+
 function createAccessToken(user) {
   return jwt.sign(
     {
       id: user.id,
-      username: user.username
+      username: user.username,
+      provider: user.provider
     },
     process.env.JWT_SECRET,
     {
@@ -60,6 +102,213 @@ function createAuthCookies(res, user) {
   });
 }
 
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function redirectToError(res, message) {
+  return res.redirect(`/auth/error?message=${encodeURIComponent(message)}`);
+}
+
+async function exchangeCodeForToken(providerKey, provider, code, codeVerifier) {
+  const params = new URLSearchParams({
+    client_id: provider.clientId,
+    client_secret: provider.clientSecret,
+    code: code,
+    redirect_uri: getRedirectUri(providerKey),
+    grant_type: 'authorization_code',
+    code_verifier: codeVerifier
+  });
+
+  let response;
+
+  if (provider.tokenMethod === 'GET') {
+    response = await fetch(`${provider.tokenUrl}?${params.toString()}`, {
+      headers: {
+        Accept: 'application/json'
+      }
+    });
+  } else {
+    response = await fetch(provider.tokenUrl, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: params
+    });
+  }
+
+  const data = await response.json();
+
+  if (!response.ok || data.error) {
+    throw new Error(data.error_description || data.error || 'Erreur pendant l’échange du code.');
+  }
+
+  return data;
+}
+
+async function fetchGoogleProfile(provider, accessToken) {
+  const response = await fetch(provider.userinfoUrl, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`
+    }
+  });
+
+  const profile = await response.json();
+
+  if (!response.ok) {
+    throw new Error('Impossible de récupérer le profil Google.');
+  }
+
+  return {
+    id: String(profile.sub),
+    email: profile.email || null,
+    displayName: profile.name || profile.email || 'Utilisateur Google'
+  };
+}
+
+async function fetchGithubProfile(provider, accessToken) {
+  const userResponse = await fetch(provider.userinfoUrl, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'Batcave-TP5'
+    }
+  });
+
+  const githubUser = await userResponse.json();
+
+  if (!userResponse.ok) {
+    throw new Error('Impossible de récupérer le profil GitHub.');
+  }
+
+  let email = githubUser.email || null;
+
+  if (!email) {
+    const emailResponse = await fetch(provider.emailsUrl, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'Batcave-TP5'
+      }
+    });
+
+    const emails = await emailResponse.json();
+
+    if (emailResponse.ok && Array.isArray(emails)) {
+      const primaryEmail = emails.find((item) => item.primary && item.verified);
+      const firstEmail = emails.find((item) => item.verified);
+
+      email = primaryEmail?.email || firstEmail?.email || null;
+    }
+  }
+
+  return {
+    id: String(githubUser.id),
+    email: email,
+    displayName: githubUser.name || githubUser.login || 'Utilisateur GitHub'
+  };
+}
+
+async function fetchFacebookProfile(provider, accessToken) {
+  const url = new URL(provider.userinfoUrl);
+
+  url.searchParams.set('fields', 'id,name,email');
+  url.searchParams.set('access_token', accessToken);
+
+  const response = await fetch(url);
+  const profile = await response.json();
+
+  if (!response.ok) {
+    throw new Error('Impossible de récupérer le profil Facebook.');
+  }
+
+  return {
+    id: String(profile.id),
+    email: profile.email || null,
+    displayName: profile.name || 'Utilisateur Facebook'
+  };
+}
+
+async function fetchProviderProfile(providerKey, provider, tokenData) {
+  if (!tokenData.access_token) {
+    throw new Error('Aucun access_token reçu du fournisseur.');
+  }
+
+  if (providerKey === 'google') {
+    return fetchGoogleProfile(provider, tokenData.access_token);
+  }
+
+  if (providerKey === 'github') {
+    return fetchGithubProfile(provider, tokenData.access_token);
+  }
+
+  if (providerKey === 'facebook') {
+    return fetchFacebookProfile(provider, tokenData.access_token);
+  }
+
+  throw new Error('Fournisseur inconnu.');
+}
+
+function findOrCreateUser(providerKey, providerProfile) {
+  const existingAccount = db.prepare(`
+    SELECT oauth_accounts.*, users.id AS local_user_id
+    FROM oauth_accounts
+    JOIN users ON users.id = oauth_accounts.user_id
+    WHERE oauth_accounts.provider = ?
+    AND oauth_accounts.provider_user_id = ?
+  `).get(providerKey, providerProfile.id);
+
+  let userId;
+
+  if (existingAccount) {
+    userId = existingAccount.local_user_id;
+  } else {
+    const localUsername = `${providerKey}:${providerProfile.id}`;
+
+    const result = db.prepare(`
+      INSERT INTO users (username, password)
+      VALUES (?, ?)
+    `).run(localUsername, 'oauth-login');
+
+    userId = result.lastInsertRowid;
+  }
+
+  db.prepare(`
+    INSERT INTO oauth_accounts (
+      user_id,
+      provider,
+      provider_user_id,
+      email,
+      display_name
+    )
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(provider, provider_user_id)
+    DO UPDATE SET
+      email = excluded.email,
+      display_name = excluded.display_name,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(
+    userId,
+    providerKey,
+    providerProfile.id,
+    providerProfile.email,
+    providerProfile.displayName
+  );
+
+  return {
+    id: userId,
+    username: providerProfile.displayName,
+    provider: providerKey
+  };
+}
+
 router.get('/', (req, res) => {
   res.redirect('/auth/login');
 });
@@ -68,217 +317,102 @@ router.get('/auth/login', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'views', 'login.html'));
 });
 
-router.post('/auth/login', async (req, res) => {
-  const { username, password } = req.body;
+router.get('/auth/error', (req, res) => {
+  const message = req.query.message || 'Erreur OAuth inconnue.';
 
-  if (!username || !password) {
-    return res.status(400).json({
-      error: 'Username et password obligatoires.'
-    });
-  }
+  const filePath = path.join(__dirname, '..', 'views', 'oauth-error.html');
+  const html = fs.readFileSync(filePath, 'utf-8');
 
-  const user = db.prepare(`
-    SELECT * FROM users
-    WHERE username = ?
-  `).get(username.trim());
-
-  if (!user) {
-    return res.status(401).json({
-      error: 'Identifiants invalides.'
-    });
-  }
-
-  const isValid = await bcrypt.compare(password, user.password);
-
-  if (!isValid) {
-    return res.status(401).json({
-      error: 'Identifiants invalides.'
-    });
-  }
-
-  if (user.two_factor_enabled === 0 || !user.two_factor_secret) {
-    return res.status(403).json({
-      setup2FA: true,
-      message: 'Mot de passe correct. Vous devez maintenant activer la double authentification.',
-      username: user.username
-    });
-  }
-
-  return res.json({
-    requires2FA: true,
-    message: 'Étape 1 validée. Veuillez fournir votre code TOTP.',
-    username: user.username
-  });
+  return res.send(html.replace('{{message}}', escapeHtml(message)));
 });
 
-router.post('/setup-2fa', async (req, res) => {
-  const { username, password } = req.body;
+router.get('/auth/:provider', (req, res) => {
+  const providerKey = req.params.provider;
+  const provider = getProvider(providerKey);
 
-  if (!username || !password) {
-    return res.status(400).json({
-      error: 'Username et password obligatoires.'
-    });
+  if (!provider) {
+    return redirectToError(res, 'Fournisseur OAuth inconnu ou mal configuré dans le fichier .env.');
   }
 
-  const user = db.prepare(`
-    SELECT * FROM users
-    WHERE username = ?
-  `).get(username.trim());
-
-  if (!user) {
-    return res.status(401).json({
-      error: 'Identifiants invalides.'
-    });
-  }
-
-  const isValid = await bcrypt.compare(password, user.password);
-
-  if (!isValid) {
-    return res.status(401).json({
-      error: 'Identifiants invalides.'
-    });
-  }
-
-  const secret = authenticator.generateSecret();
-  const otpauth = authenticator.keyuri(user.username, 'Batcave', secret);
-  const qrCode = await qrcode.toDataURL(otpauth);
+  const state = createRandomValue(32);
+  const codeVerifier = createCodeVerifier();
+  const codeChallenge = createCodeChallenge(codeVerifier);
 
   db.prepare(`
-    UPDATE users
-    SET two_factor_secret = ?, two_factor_enabled = 0
-    WHERE id = ?
-  `).run(secret, user.id);
+    INSERT INTO oauth_states (state, provider, code_verifier)
+    VALUES (?, ?, ?)
+  `).run(state, providerKey, codeVerifier);
 
-  return res.json({
-    qrCode: qrCode,
-    secret: secret
+  const params = new URLSearchParams({
+    client_id: provider.clientId,
+    redirect_uri: getRedirectUri(providerKey),
+    response_type: 'code',
+    scope: provider.scope,
+    state: state,
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256'
   });
+
+  for (const [key, value] of Object.entries(provider.extraAuthParams)) {
+    params.set(key, value);
+  }
+
+  return res.redirect(`${provider.authorizeUrl}?${params.toString()}`);
 });
 
-router.post('/confirm-2fa', (req, res) => {
-  const { username, code } = req.body;
+router.get('/auth/:provider/callback', async (req, res) => {
+  const providerKey = req.params.provider;
+  const provider = getProvider(providerKey);
 
-  if (!username || !code) {
-    return res.status(400).json({
-      error: 'Username et code obligatoires.'
-    });
+  if (!provider) {
+    return redirectToError(res, 'Fournisseur OAuth inconnu ou mal configuré.');
   }
 
-  const user = db.prepare(`
-    SELECT * FROM users
-    WHERE username = ?
-  `).get(username.trim());
-
-  if (!user || !user.two_factor_secret) {
-    return res.status(404).json({
-      error: 'Utilisateur ou secret 2FA introuvable.'
-    });
+  if (req.query.error) {
+    return redirectToError(
+      res,
+      `Connexion annulée ou refusée : ${req.query.error_description || req.query.error}`
+    );
   }
 
-  const isValid = authenticator.check(code, user.two_factor_secret);
+  const { code, state } = req.query;
 
-  if (!isValid) {
-    return res.status(401).json({
-      error: 'Code incorrect. Activation avortée.'
-    });
+  if (!code || !state) {
+    return redirectToError(res, 'Callback OAuth invalide : code ou state manquant.');
+  }
+
+  const storedState = db.prepare(`
+    SELECT * FROM oauth_states
+    WHERE state = ?
+    AND provider = ?
+  `).get(state, providerKey);
+
+  if (!storedState) {
+    return redirectToError(res, 'State OAuth invalide. La connexion est refusée.');
   }
 
   db.prepare(`
-    UPDATE users
-    SET two_factor_enabled = 1
-    WHERE id = ?
-  `).run(user.id);
-
-  return res.json({
-    success: true,
-    message: 'La 2FA est désormais activée sur votre compte.'
-  });
-});
-
-router.post('/api/verify-2fa', (req, res) => {
-  const { username, code } = req.body;
-
-  if (!username || !code) {
-    return res.status(400).json({
-      error: 'Username et code obligatoires.'
-    });
-  }
-
-  const user = db.prepare(`
-    SELECT * FROM users
-    WHERE username = ?
-  `).get(username.trim());
-
-  if (!user || !user.two_factor_secret || user.two_factor_enabled !== 1) {
-    return res.status(401).json({
-      error: '2FA non activée pour cet utilisateur.'
-    });
-  }
-
-  const isValid = authenticator.check(code, user.two_factor_secret);
-
-  if (!isValid) {
-    return res.status(401).json({
-      error: 'Code 2FA invalide ou expiré.'
-    });
-  }
-
-  createAuthCookies(res, user);
-
-  return res.json({
-    success: true,
-    message: 'Authentification double facteur réussie.'
-  });
-});
-
-router.get('/auth/logout', (req, res) => {
-  const refreshToken = req.cookies.refreshToken;
-
-  if (refreshToken) {
-    db.prepare(`
-      DELETE FROM refresh_tokens
-      WHERE token = ?
-    `).run(refreshToken);
-  }
-
-  res.clearCookie('accessToken', cookieOptions);
-  res.clearCookie('refreshToken', cookieOptions);
-
-  return res.redirect('/auth/login');
-});
-
-router.post('/auth/register', async (req, res) => {
-  const { username, password } = req.body;
-
-  if (!username || !password) {
-    return res.status(400).send('Username et password obligatoires.');
-  }
-
-  const cleanUsername = username.trim();
-
-  if (cleanUsername.length === 0 || /\s/.test(cleanUsername)) {
-    return res.status(400).send("Le nom d'utilisateur ne doit pas contenir d'espaces.");
-  }
-
-  if (password.length < 8) {
-    return res.status(400).send('Le mot de passe doit contenir au moins 8 caractères.');
-  }
-
-  const hash = await bcrypt.hash(password, 10);
+    DELETE FROM oauth_states
+    WHERE state = ?
+  `).run(state);
 
   try {
-    db.prepare(`
-      INSERT INTO users (username, password)
-      VALUES (?, ?)
-    `).run(cleanUsername, hash);
+    const tokenData = await exchangeCodeForToken(
+      providerKey,
+      provider,
+      code,
+      storedState.code_verifier
+    );
 
-    return res.status(201).send('Utilisateur créé avec succès.');
-  } catch (err) {
-    if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
-      return res.status(409).send("Ce nom d'utilisateur existe déjà.");
-    }
+    const providerProfile = await fetchProviderProfile(providerKey, provider, tokenData);
+    const user = findOrCreateUser(providerKey, providerProfile);
 
-    return res.status(500).send('Erreur serveur.');
+    createAuthCookies(res, user);
+
+    return res.redirect('/bat-computer');
+  } catch (error) {
+    console.error('Erreur OAuth :', error);
+    return redirectToError(res, error.message);
   }
 });
 
@@ -290,10 +424,16 @@ router.post('/api/auth/refresh', (req, res) => {
   }
 
   const tokenInDb = db.prepare(`
-    SELECT refresh_tokens.*, users.username
+    SELECT
+      refresh_tokens.*,
+      users.id AS local_user_id,
+      COALESCE(oauth_accounts.display_name, users.username) AS display_name,
+      oauth_accounts.provider AS provider
     FROM refresh_tokens
     JOIN users ON users.id = refresh_tokens.user_id
+    LEFT JOIN oauth_accounts ON oauth_accounts.user_id = users.id
     WHERE refresh_tokens.token = ?
+    LIMIT 1
   `).get(refreshToken);
 
   if (!tokenInDb) {
@@ -310,8 +450,9 @@ router.post('/api/auth/refresh', (req, res) => {
   }
 
   const accessToken = createAccessToken({
-    id: tokenInDb.user_id,
-    username: tokenInDb.username
+    id: tokenInDb.local_user_id,
+    username: tokenInDb.display_name,
+    provider: tokenInDb.provider
   });
 
   res.cookie('accessToken', accessToken, {
@@ -322,45 +463,20 @@ router.post('/api/auth/refresh', (req, res) => {
   return res.status(200).send('Access token renouvelé.');
 });
 
-router.post('/api/auth/change-password', isAuthenticated, async (req, res) => {
-  const { oldPassword, newPassword } = req.body;
+router.get('/auth/logout', (req, res) => {
+  const refreshToken = req.cookies.refreshToken;
 
-  if (!oldPassword || !newPassword) {
-    return res.status(400).send('Ancien et nouveau mot de passe obligatoires.');
+  if (refreshToken) {
+    db.prepare(`
+      DELETE FROM refresh_tokens
+      WHERE token = ?
+    `).run(refreshToken);
   }
 
-  const strongPasswordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{12,}$/;
+  res.clearCookie('accessToken', cookieOptions);
+  res.clearCookie('refreshToken', cookieOptions);
 
-  if (!strongPasswordRegex.test(newPassword)) {
-    return res.status(400).send(
-      'Le nouveau mot de passe doit contenir au moins 12 caractères, une majuscule, une minuscule, un chiffre et un caractère spécial.'
-    );
-  }
-
-  const user = db.prepare(`
-    SELECT * FROM users
-    WHERE id = ?
-  `).get(req.user.id);
-
-  if (!user) {
-    return res.status(404).send('Utilisateur introuvable.');
-  }
-
-  const isOldPasswordValid = await bcrypt.compare(oldPassword, user.password);
-
-  if (!isOldPasswordValid) {
-    return res.status(401).send('Ancien mot de passe incorrect.');
-  }
-
-  const newHash = await bcrypt.hash(newPassword, 10);
-
-  db.prepare(`
-    UPDATE users
-    SET password = ?
-    WHERE id = ?
-  `).run(newHash, req.user.id);
-
-  return res.status(200).send('Mot de passe modifié avec succès.');
+  return res.redirect('/auth/login');
 });
 
 module.exports = router;

@@ -12,7 +12,8 @@ router.get('/bat-computer', canOpenDashboard, (req, res) => {
 router.get('/api/me', isAuthenticated, (req, res) => {
   res.json({
     id: req.user.id,
-    username: req.user.username
+    username: req.user.username,
+    provider: req.user.provider
   });
 });
 

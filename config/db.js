@@ -34,25 +34,28 @@ db.prepare(`
   )
 `).run();
 
-function addColumnIfMissing(tableName, columnName, sql) {
-  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all();
-  const exists = columns.some((column) => column.name === columnName);
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS oauth_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    provider TEXT NOT NULL,
+    provider_user_id TEXT NOT NULL,
+    email TEXT,
+    display_name TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(provider, provider_user_id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  )
+`).run();
 
-  if (!exists) {
-    db.prepare(sql).run();
-  }
-}
-
-addColumnIfMissing(
-  'users',
-  'two_factor_secret',
-  'ALTER TABLE users ADD COLUMN two_factor_secret TEXT'
-);
-
-addColumnIfMissing(
-  'users',
-  'two_factor_enabled',
-  'ALTER TABLE users ADD COLUMN two_factor_enabled INTEGER DEFAULT 0'
-);
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS oauth_states (
+    state TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    code_verifier TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  )
+`).run();
 
 module.exports = db;
