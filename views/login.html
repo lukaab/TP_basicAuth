@@ -11,7 +11,7 @@
       display: flex;
       justify-content: center;
       align-items: center;
-      height: 100vh;
+      min-height: 100vh;
       margin: 0;
     }
 
@@ -19,11 +19,11 @@
       background-color: #222;
       padding: 30px;
       border-radius: 10px;
-      width: 350px;
+      width: 420px;
       border: 1px solid #444;
     }
 
-    h1 {
+    h1, h2 {
       color: #f5c542;
       text-align: center;
     }
@@ -57,26 +57,84 @@
     p {
       text-align: center;
     }
+
+    .hidden {
+      display: none;
+    }
+
+    #qrCodeImage {
+      width: 220px;
+      display: block;
+      margin: 20px auto;
+      background-color: white;
+      padding: 10px;
+    }
+
+    .message {
+      margin-top: 15px;
+      text-align: center;
+    }
+
+    .secret {
+      word-break: break-all;
+      font-size: 13px;
+      background-color: #111;
+      padding: 10px;
+      border: 1px solid #444;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Connexion Batcave</h1>
 
-    <form action="/auth/login" method="POST">
+    <form id="loginForm">
       <label for="username">Nom d'utilisateur</label>
-      <input type="text" id="username" name="username" required>
+      <input type="text" id="username" required>
 
       <label for="password">Mot de passe</label>
-      <input type="password" id="password" name="password" required>
+      <input type="password" id="password" required>
 
       <button type="submit">Se connecter</button>
     </form>
+
+    <div id="twoFactorZone" class="hidden">
+      <h2>Code 2FA</h2>
+
+      <label for="code2FA">Code à 6 chiffres</label>
+      <input type="text" id="code2FA" placeholder="000000">
+
+      <button id="verify2FAButton">Vérifier le code</button>
+    </div>
+
+    <div id="setupZone" class="hidden">
+      <h2>Activer la 2FA</h2>
+
+      <p>Scanne ce QR Code avec Google Authenticator ou une application équivalente.</p>
+
+      <button id="generateQRButton">Générer le QR Code</button>
+
+      <div id="qrResult" class="hidden">
+        <img id="qrCodeImage" alt="QR Code 2FA">
+
+        <p>Secret de secours :</p>
+        <p id="secretText" class="secret"></p>
+
+        <label for="confirmCode">Premier code à 6 chiffres</label>
+        <input type="text" id="confirmCode" placeholder="000000">
+
+        <button id="confirm2FAButton">Confirmer l'activation</button>
+      </div>
+    </div>
+
+    <p id="message" class="message"></p>
 
     <p>
       Pas encore inscrit ?
       <a href="/register.html">Créer un compte</a>
     </p>
   </div>
+
+  <script src="/login.js"></script>
 </body>
 </html>

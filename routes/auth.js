@@ -3,19 +3,22 @@ const bcrypt = require('bcrypt');
 const path = require('path');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const qrcode = require('qrcode');
+const { authenticator } = require('@otplib/preset-v11');
+
 const db = require('../config/db');
 const { isAuthenticated } = require('../middlewares/authCheck');
 
 const router = express.Router();
 
-const ACCESS_TOKEN_TIME = '15s';
-const ACCESS_TOKEN_COOKIE_TIME = 15000;
+const ACCESS_TOKEN_TIME = '15m';
+const ACCESS_TOKEN_COOKIE_TIME = 15 * 60 * 1000;
 const REFRESH_TOKEN_COOKIE_TIME = 7 * 24 * 60 * 60 * 1000;
 
 const cookieOptions = {
   httpOnly: true,
   sameSite: 'strict',
-  secure: false
+  secure: process.env.NODE_ENV === 'production'
 };
 
 function createAccessToken(user) {
@@ -35,36 +38,7 @@ function createRefreshToken() {
   return crypto.randomBytes(64).toString('hex');
 }
 
-router.get('/', (req, res) => {
-  res.redirect('/auth/login');
-});
-
-router.get('/auth/login', (req, res) => {
-  res.sendFile(path.join(__dirname, '..', 'views', 'login.html'));
-});
-
-router.post('/auth/login', async (req, res) => {
-  const { username, password } = req.body;
-
-  if (!username || !password) {
-    return res.status(400).send('Username et password obligatoires.');
-  }
-
-  const user = db.prepare(`
-    SELECT * FROM users
-    WHERE username = ?
-  `).get(username.trim());
-
-  if (!user) {
-    return res.status(401).send('Identifiants invalides.');
-  }
-
-  const isValid = await bcrypt.compare(password, user.password);
-
-  if (!isValid) {
-    return res.status(401).send('Identifiants invalides.');
-  }
-
+function createAuthCookies(res, user) {
   const accessToken = createAccessToken(user);
   const refreshToken = createRefreshToken();
 
@@ -84,8 +58,177 @@ router.post('/auth/login', async (req, res) => {
     ...cookieOptions,
     maxAge: REFRESH_TOKEN_COOKIE_TIME
   });
+}
 
-  return res.redirect('/bat-computer');
+router.get('/', (req, res) => {
+  res.redirect('/auth/login');
+});
+
+router.get('/auth/login', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'views', 'login.html'));
+});
+
+router.post('/auth/login', async (req, res) => {
+  const { username, password } = req.body;
+
+  if (!username || !password) {
+    return res.status(400).json({
+      error: 'Username et password obligatoires.'
+    });
+  }
+
+  const user = db.prepare(`
+    SELECT * FROM users
+    WHERE username = ?
+  `).get(username.trim());
+
+  if (!user) {
+    return res.status(401).json({
+      error: 'Identifiants invalides.'
+    });
+  }
+
+  const isValid = await bcrypt.compare(password, user.password);
+
+  if (!isValid) {
+    return res.status(401).json({
+      error: 'Identifiants invalides.'
+    });
+  }
+
+  if (user.two_factor_enabled === 0 || !user.two_factor_secret) {
+    return res.status(403).json({
+      setup2FA: true,
+      message: 'Mot de passe correct. Vous devez maintenant activer la double authentification.',
+      username: user.username
+    });
+  }
+
+  return res.json({
+    requires2FA: true,
+    message: 'Étape 1 validée. Veuillez fournir votre code TOTP.',
+    username: user.username
+  });
+});
+
+router.post('/setup-2fa', async (req, res) => {
+  const { username, password } = req.body;
+
+  if (!username || !password) {
+    return res.status(400).json({
+      error: 'Username et password obligatoires.'
+    });
+  }
+
+  const user = db.prepare(`
+    SELECT * FROM users
+    WHERE username = ?
+  `).get(username.trim());
+
+  if (!user) {
+    return res.status(401).json({
+      error: 'Identifiants invalides.'
+    });
+  }
+
+  const isValid = await bcrypt.compare(password, user.password);
+
+  if (!isValid) {
+    return res.status(401).json({
+      error: 'Identifiants invalides.'
+    });
+  }
+
+  const secret = authenticator.generateSecret();
+  const otpauth = authenticator.keyuri(user.username, 'Batcave', secret);
+  const qrCode = await qrcode.toDataURL(otpauth);
+
+  db.prepare(`
+    UPDATE users
+    SET two_factor_secret = ?, two_factor_enabled = 0
+    WHERE id = ?
+  `).run(secret, user.id);
+
+  return res.json({
+    qrCode: qrCode,
+    secret: secret
+  });
+});
+
+router.post('/confirm-2fa', (req, res) => {
+  const { username, code } = req.body;
+
+  if (!username || !code) {
+    return res.status(400).json({
+      error: 'Username et code obligatoires.'
+    });
+  }
+
+  const user = db.prepare(`
+    SELECT * FROM users
+    WHERE username = ?
+  `).get(username.trim());
+
+  if (!user || !user.two_factor_secret) {
+    return res.status(404).json({
+      error: 'Utilisateur ou secret 2FA introuvable.'
+    });
+  }
+
+  const isValid = authenticator.check(code, user.two_factor_secret);
+
+  if (!isValid) {
+    return res.status(401).json({
+      error: 'Code incorrect. Activation avortée.'
+    });
+  }
+
+  db.prepare(`
+    UPDATE users
+    SET two_factor_enabled = 1
+    WHERE id = ?
+  `).run(user.id);
+
+  return res.json({
+    success: true,
+    message: 'La 2FA est désormais activée sur votre compte.'
+  });
+});
+
+router.post('/api/verify-2fa', (req, res) => {
+  const { username, code } = req.body;
+
+  if (!username || !code) {
+    return res.status(400).json({
+      error: 'Username et code obligatoires.'
+    });
+  }
+
+  const user = db.prepare(`
+    SELECT * FROM users
+    WHERE username = ?
+  `).get(username.trim());
+
+  if (!user || !user.two_factor_secret || user.two_factor_enabled !== 1) {
+    return res.status(401).json({
+      error: '2FA non activée pour cet utilisateur.'
+    });
+  }
+
+  const isValid = authenticator.check(code, user.two_factor_secret);
+
+  if (!isValid) {
+    return res.status(401).json({
+      error: 'Code 2FA invalide ou expiré.'
+    });
+  }
+
+  createAuthCookies(res, user);
+
+  return res.json({
+    success: true,
+    message: 'Authentification double facteur réussie.'
+  });
 });
 
 router.get('/auth/logout', (req, res) => {

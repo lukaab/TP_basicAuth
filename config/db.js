@@ -34,4 +34,25 @@ db.prepare(`
   )
 `).run();
 
+function addColumnIfMissing(tableName, columnName, sql) {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all();
+  const exists = columns.some((column) => column.name === columnName);
+
+  if (!exists) {
+    db.prepare(sql).run();
+  }
+}
+
+addColumnIfMissing(
+  'users',
+  'two_factor_secret',
+  'ALTER TABLE users ADD COLUMN two_factor_secret TEXT'
+);
+
+addColumnIfMissing(
+  'users',
+  'two_factor_enabled',
+  'ALTER TABLE users ADD COLUMN two_factor_enabled INTEGER DEFAULT 0'
+);
+
 module.exports = db;

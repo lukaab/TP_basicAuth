@@ -43,17 +43,24 @@ async function loadSecrets() {
   const secrets = await response.json();
 
   const container = document.getElementById('secrets');
-  container.innerHTML = '';
+  container.textContent = '';
 
   secrets.forEach((secret) => {
     const card = document.createElement('div');
     card.className = 'card';
 
-    card.innerHTML = `
-      <h3>${secret.name}</h3>
-      <p>${secret.desc}</p>
-      <small>${secret.icon}</small>
-    `;
+    const title = document.createElement('h3');
+    title.textContent = secret.name;
+
+    const description = document.createElement('p');
+    description.textContent = secret.desc;
+
+    const icon = document.createElement('small');
+    icon.textContent = secret.icon;
+
+    card.appendChild(title);
+    card.appendChild(description);
+    card.appendChild(icon);
 
     container.appendChild(card);
   });
