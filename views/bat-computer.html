@@ -34,10 +34,16 @@
       width: 220px;
     }
 
-    textarea {
+    textarea,
+    input {
       width: 100%;
+      padding: 10px;
+      margin-top: 10px;
+      box-sizing: border-box;
+    }
+
+    textarea {
       height: 100px;
-      margin-top: 20px;
     }
 
     button {
@@ -45,72 +51,49 @@
       padding: 10px 15px;
       cursor: pointer;
     }
+
+    .section {
+      margin-top: 30px;
+      padding-top: 20px;
+      border-top: 1px solid #444;
+    }
   </style>
 </head>
 <body>
   <h1>Bat-Ordinateur</h1>
 
-  <p>Bienvenue, Justicier {{username}}</p>
+  <p>Bienvenue, Justicier <span id="username">...</span></p>
 
   <p>
     <a href="/auth/logout">Se déconnecter</a>
   </p>
 
-  <h2>Gadgets secrets</h2>
-  <div id="secrets" class="grid"></div>
+  <div class="section">
+    <h2>Gadgets secrets</h2>
+    <button id="reloadSecrets">Recharger les gadgets</button>
+    <div id="secrets" class="grid"></div>
+  </div>
 
-  <h2>Rapport de mission</h2>
-  <textarea id="reportContent" placeholder="Écris ton rapport ici..."></textarea>
-  <br>
-  <button id="sendReport">Envoyer le rapport</button>
+  <div class="section">
+    <h2>Rapport de mission</h2>
+    <textarea id="reportContent" placeholder="Écris ton rapport ici..."></textarea>
+    <br>
+    <button id="sendReport">Envoyer le rapport</button>
+    <p id="reportMessage"></p>
+  </div>
 
-  <p id="message"></p>
+  <div class="section">
+    <h2>Modifier mon mot de passe</h2>
 
-  <script>
-    async function loadSecrets() {
-      const response = await fetch('/api/secrets');
+    <form id="changePasswordForm">
+      <input type="password" id="oldPassword" placeholder="Ancien mot de passe" required>
+      <input type="password" id="newPassword" placeholder="Nouveau mot de passe fort" required>
+      <button type="submit">Modifier le mot de passe</button>
+    </form>
 
-      if (!response.ok) {
-        window.location.href = '/auth/login';
-        return;
-      }
+    <p id="passwordMessage"></p>
+  </div>
 
-      const secrets = await response.json();
-      const container = document.getElementById('secrets');
-
-      secrets.forEach(secret => {
-        const card = document.createElement('div');
-        card.className = 'card';
-
-        card.innerHTML = `
-          <h3>${secret.name}</h3>
-          <p>${secret.desc}</p>
-          <small>${secret.icon}</small>
-        `;
-
-        container.appendChild(card);
-      });
-    }
-
-    async function sendReport() {
-      const content = document.getElementById('reportContent').value;
-
-      const response = await fetch('/api/reports', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ content: content })
-      });
-
-      const message = await response.text();
-
-      document.getElementById('message').textContent = message;
-    }
-
-    document.getElementById('sendReport').addEventListener('click', sendReport);
-
-    loadSecrets();
-  </script>
+  <script src="/dashboard.js"></script>
 </body>
 </html>

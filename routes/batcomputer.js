@@ -1,24 +1,18 @@
 const express = require('express');
 const path = require('path');
-const fs = require('fs');
 const db = require('../config/db');
-const isAuthenticated = require('../middlewares/authCheck');
+const { isAuthenticated, canOpenDashboard } = require('../middlewares/authCheck');
 
 const router = express.Router();
 
-router.get('/bat-computer', isAuthenticated, (req, res) => {
-  const filePath = path.join(__dirname, '..', 'views', 'bat-computer.html');
-  const html = fs.readFileSync(filePath, 'utf-8');
-
-  const personalizedHtml = html.replace('{{username}}', req.session.user.username);
-
-  return res.send(personalizedHtml);
+router.get('/bat-computer', canOpenDashboard, (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'views', 'bat-computer.html'));
 });
 
 router.get('/api/me', isAuthenticated, (req, res) => {
   res.json({
-    id: req.session.user.id,
-    username: req.session.user.username
+    id: req.user.id,
+    username: req.user.username
   });
 });
 
@@ -52,7 +46,7 @@ router.post('/api/reports', isAuthenticated, (req, res) => {
   db.prepare(`
     INSERT INTO reports (user_id, content)
     VALUES (?, ?)
-  `).run(req.session.user.id, content.trim());
+  `).run(req.user.id, content.trim());
 
   return res.status(201).send('Rapport enregistré.');
 });
